@@ -83,15 +83,16 @@ def generate_messages(file_path: pathlib.Path):
 
                 csv_reader = csv.DictReader(csv_file)
                 for row in csv_reader:
+                    row = {key.strip('"'): value for key, value in row.items()}
                     # Ensure required fields are present
-                    if "timestamp" not in row or "Item name" not in row or "inventory level" not in row:
+                    if "timestamp" not in row or "Item name" not in row or "Inventory level" not in row:
                         logger.error(f"Missing required column in row: {row}")
                         continue
 
                     message = {
                         "timestamp": row["timestamp"],
                         "item_name": row["Item name"],
-                        "inventory_level": int(row["inventory level" ]),
+                        "inventory_level": int(row["Inventory level" ]),
                     }
                     
                     logger.debug(f"Generated message: {message}")
