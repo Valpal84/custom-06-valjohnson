@@ -1,10 +1,10 @@
 """
-csv_consumer_valjohnson.py
+consumer_valjohnson.py
 
 Consume json messages from a Kafka topic and process them.
 
 Example Kafka message format:
-{"craft_supply": "Markers", "count": 246}
+{'timestamp': '2024-10-19 03:19:40', 'item_name': 'Badge Toppers', 'inventory_level': 452}
 
 """
 
@@ -15,6 +15,8 @@ Example Kafka message format:
 # Import packages from Python Standard Library
 import os
 import json
+import matplotlib.pyplot as plt
+from twilio.rest import Client
 
 # Use a deque ("deck") - a double-ended queue data structure
 # A deque is a good way to monitor a certain number of "most recent" messages
@@ -42,7 +44,7 @@ load_dotenv()
 
 def get_kafka_topic() -> str:
     """Fetch Kafka topic from environment or use default."""
-    topic = os.getenv("CRAFT_TOPIC", "unknown_topic")
+    topic = os.getenv("INVENTORY_TOPIC", "inventory_topic")
     logger.info(f"Kafka topic: {topic}")
     return topic
 
