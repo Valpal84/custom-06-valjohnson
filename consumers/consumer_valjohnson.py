@@ -1,289 +1,202 @@
 """
-kafka_consumer_case.py
+csv_consumer_valjohnson.py
 
-Consume json messages from a live data file. 
-Insert the processed messages into a database.
+Consume json messages from a Kafka topic and process them.
 
-Example JSON message
-{
-    "message": "I just shared a meme! It was amazing.",
-    "author": "Charlie",
-    "timestamp": "2025-01-29 14:35:20",
-    "category": "humor",
-    "sentiment": 0.87,
-    "keyword_mentioned": "meme",
-    "message_length": 42
-}
+Example Kafka message format:
+{"craft_supply": "Markers", "count": 246}
 
-Database functions are in consumers/db_sqlite_case.py.
-Environment variables are in utils/utils_config module. 
 """
 
 #####################################
 # Import Modules
 #####################################
 
-# import from standard library
-import json
+# Import packages from Python Standard Library
 import os
-import pathlib
-import sys
-from collections import defaultdict
-import nltk
-import matplotlib.pyplot as plt
-import threading
-import time
+import json
 
-# import external modules
-from kafka import KafkaConsumer
-from nltk.sentiment import SentimentIntensityAnalyzer
+# Use a deque ("deck") - a double-ended queue data structure
+# A deque is a good way to monitor a certain number of "most recent" messages
+# A deque is a great data structure for time windows (e.g. the last 5 messages)
+from collections import deque
 
-# import from local modules
-import utils.utils_config as config
+# Import external packages
+from dotenv import load_dotenv
+
+# Import functions from local modules
 from utils.utils_consumer import create_kafka_consumer
 from utils.utils_logger import logger
-from utils.utils_producer import verify_services, is_topic_available
 
-# Ensure the parent directory is in sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from consumers.db_sqlite_case import init_db, insert_message
+#####################################
+# Load Environment Variables
+#####################################
 
-nltk.download("vader_lexicon")
-sia = SentimentIntensityAnalyzer()
+# Load environment variables from .env
+load_dotenv()
 
-author_sentiments = defaultdict(list)
+#####################################
+# Getter Functions for .env Variables
+#####################################
 
-time_series = []
-eve_sentiments =[]
-other_sentiments = []
+
+def get_kafka_topic() -> str:
+    """Fetch Kafka topic from environment or use default."""
+    topic = os.getenv("CRAFT_TOPIC", "unknown_topic")
+    logger.info(f"Kafka topic: {topic}")
+    return topic
+
+
+def get_kafka_consumer_group_id() -> str:
+    """Fetch Kafka consumer group id from environment or use default."""
+    group_id: str = os.getenv("CRAFT_CONSUMER_GROUP_ID", "default_group")
+    logger.info(f"Kafka consumer group id: {group_id}")
+    return group_id
+
+
+def get_stall_threshold() -> float:
+    """Fetch message interval from environment or use default."""
+    count_variation = float(os.getenv("CRAFT_STALL_THRESHOLD_", 2))
+    logger.info(f"Max count variation before stall: {count_variation}")
+    return count_variation
+
+
+def get_rolling_window_size() -> int:
+    """Fetch rolling window size from environment or use default."""
+    window_size = int(os.getenv("CRAFT_ROLLING_WINDOW_SIZE", 8))
+    logger.info(f"Rolling window size: {window_size}")
+    return window_size
+
+
+#####################################
+# Define a function to detect a stall
+#####################################
+
+
+def detect_stall(rolling_window_deque: deque) -> bool:
+    """
+    Detect a count stall based on the rolling window.
+
+    Args:
+        rolling_window_deque (deque): Rolling window of craft supply counts.
+
+    Returns:
+        bool: True if a stall is detected, False otherwise.
+    """
+    WINDOW_SIZE: int = get_rolling_window_size()
+    if len(rolling_window_deque) < WINDOW_SIZE:
+        # We don't have a full deque yet
+        # Keep reading until the deque is full
+        logger.debug(
+            f"Rolling window size: {len(rolling_window_deque)}. Waiting for {WINDOW_SIZE}."
+        )
+        return False
+
+    # Once the deque is full we can calculate the count range
+    # Use Python's built-in min() and max() functions
+    # If the range is less than or equal to the threshold, we have a stall
+    # And our counts are finalized :)
+    count_range = max(rolling_window_deque) - min(rolling_window_deque)
+    is_stalled: bool = count_range <= get_stall_threshold()
+    logger.debug(f"Count range: {count_range}. Stalled: {is_stalled}")
+    return is_stalled
 
 
 #####################################
 # Function to process a single message
 # #####################################
 
-def analyze_sentiment(text):
-    """Perform sentiment analysis on the given text."""
-    sentiment_score = sia.polarity_scores(text)["compound"]
-    return sentiment_score
 
-def process_message(message: dict) -> None:
+def process_message(message: str, rolling_window: deque, window_size: int) -> None:
     """
-    Process and transform a single JSON message.
-    Performs sentiment analysis and tracks author sentiment scores.
-    """
-    logger.info("Called process_message() with:")
-    logger.info(f"   {message=}")
-
-    try:
-        text = message.get("message", "")
-        if not text:  # Ensure message text exists
-            raise ValueError("Empty message text received.")
-
-        sentiment_score = analyze_sentiment(text)  # Get sentiment score
-
-        processed_message = {
-            "message": text,
-            "author": message.get("author", "Unknown"),  # Default if missing
-            "timestamp": message.get("timestamp"),
-            "category": message.get("category"),
-            "sentiment": sentiment_score,
-            "keyword_mentioned": message.get("keyword_mentioned"),
-            "message_length": int(message.get("message_length", 0)),
-        }
-
-        author_sentiments[processed_message["author"].lower()].append(sentiment_score)
-        logger.info(f"Processed message: {processed_message}")
-        compare_eve_sentiment()
-        return processed_message
-
-    except Exception as e:
-        logger.error(f"Error processing message: {e}")
-        return None
-    
-def plot_sentiment_comparison():
-    """Continuously update a live line chart comparing Eve's sentiment to others."""
-    plt.ion()  # Turn on interactive mode
-    fig, ax = plt.subplots()
-    
-    while True:
-        ax.clear()
-        ax.plot(time_series, eve_sentiments, label="Eve", marker="^", linestyle="-", color="blue")
-        ax.plot(time_series, other_sentiments, label="Others", marker="o", linestyle="-", color="green")
-
-        ax.set_title("Sentiment Comparison: Eve vs Others")
-        ax.set_xlabel("Time Step")
-        ax.set_ylabel("Average Sentiment Score")
-        ax.legend()
-        ax.grid(True)
-        
-        plt.draw()
-        plt.pause(2)  # Refresh every 2 seconds
-
-def compare_eve_sentiment():
-    """Compare Eve's sentiment scores to the average sentiment of all other authors."""
-    eve_scores = author_sentiments.get("eve", [])
-    other_scores = [
-        score for author, scores in author_sentiments.items() if author != "eve" for score in scores
-    ]
-
-    avg_eve = sum(eve_scores) / len(eve_scores) if eve_scores else None
-    avg_other = sum(other_scores) / len(other_scores) if other_scores else None
-
-    if avg_eve is not None and avg_other is not None:
-        logger.info(f"Eve's avg sentiment: {avg_eve:.3f}, Others' avg sentiment: {avg_other:.3f}")
-        time_series.append(len(time_series) + 1)
-        eve_sentiments.append(avg_eve)
-        other_sentiments.append(avg_other)
-    elif avg_eve is not None:
-        logger.info(f"Eve's avg sentiment: {avg_eve:.3f}, but no other authors' messages to compare.")
-    elif avg_other is not None:
-        logger.info(f"No messages from Eve yet. Others' avg sentiment: {avg_other:.3f}")
-    else:
-        logger.info("No messages received from any authors yet.")
-
-
-#####################################
-# Consume Messages from Kafka Topic
-#####################################
-
-
-def consume_messages_from_kafka(
-    topic: str,
-    kafka_url: str,
-    group: str,
-    sql_path: pathlib.Path,
-    interval_secs: int,
-):
-    """
-    Consume new messages from Kafka topic and process them.
-    Each message is expected to be JSON-formatted.
+    Process a JSON-transferred CSV message and check for stalls.
 
     Args:
-    - topic (str): Kafka topic to consume messages from.
-    - kafka_url (str): Kafka broker address.
-    - group (str): Consumer group ID for Kafka.
-    - sql_path (pathlib.Path): Path to the SQLite database file.
-    - interval_secs (int): Interval between reads from the file.
+        message (str): JSON message received from Kafka.
+        rolling_window (deque): Rolling window of temperature readings.
+        window_size (int): Size of the rolling window.
     """
-    logger.info("Called consume_messages_from_kafka() with:")
-    logger.info(f"   {topic=}")
-    logger.info(f"   {kafka_url=}")
-    logger.info(f"   {group=}")
-    logger.info(f"   {sql_path=}")
-    logger.info(f"   {interval_secs=}")
-
-    logger.info("Step 1. Verify Kafka Services.")
     try:
-        verify_services()
-    except Exception as e:
-        logger.error(f"ERROR: Kafka services verification failed: {e}")
-        sys.exit(11)
+        # Log the raw message for debugging
+        logger.debug(f"Raw message: {message}")
 
-    logger.info("Step 2. Create a Kafka consumer.")
-    try:
-        consumer: KafkaConsumer = create_kafka_consumer(
-            topic,
-            group,
-            value_deserializer_provided=lambda x: json.loads(x.decode("utf-8")),
-        )
-    except Exception as e:
-        logger.error(f"ERROR: Could not create Kafka consumer: {e}")
-        sys.exit(11)
+        # Parse the JSON string into a Python dictionary
+        data: dict = json.loads(message)
+        count = data.get("count")
+        craft_supply = data.get("craft_supply")
+        logger.info(f"Processed JSON message: {data}")
 
-    logger.info("Step 3. Verify topic exists.")
-    if consumer is not None:
-        try:
-            is_topic_available(topic)
-            logger.info(f"Kafka topic '{topic}' is ready.")
-        except Exception as e:
-            logger.error(
-                f"ERROR: Topic '{topic}' does not exist. Please run the Kafka producer. : {e}"
+        # Ensure the required fields are present
+        if count is None or craft_supply is None:
+            logger.error(f"Invalid message format: {message}")
+            return
+
+        # Append the count reading to the rolling window
+        rolling_window.append(count)
+
+        # Check for reorder alert
+        if count < 5:
+            logger.warning(f"LOW STOCK ALERT: '{craft_supply}' count is {count}. Reorder recommended!")
+
+        # Check for a stall
+        if detect_stall(rolling_window):
+            logger.info(
+                f"STALL DETECTED at {craft_supply}: count stable at {count} over last {window_size} readings."
             )
-            sys.exit(13)
 
-    logger.info("Step 4. Process messages.")
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decoding error for message '{message}': {e}")
+    except Exception as e:
+        logger.error(f"Error processing message '{message}': {e}")
 
-    if consumer is None:
-        logger.error("ERROR: Consumer is None. Exiting.")
-        sys.exit(13)
 
+#####################################
+# Define main function for this module
+#####################################
+
+
+def main() -> None:
+    """
+    Main entry point for the consumer.
+
+    - Reads the Kafka topic name and consumer group ID from environment variables.
+    - Creates a Kafka consumer using the `create_kafka_consumer` utility.
+    - Polls and processes messages from the Kafka topic.
+    """
+    logger.info("START consumer.")
+
+    # fetch .env content
+    topic = get_kafka_topic()
+    group_id = get_kafka_consumer_group_id()
+    window_size = get_rolling_window_size()
+    logger.info(f"Consumer: Topic '{topic}' and group '{group_id}'...")
+    logger.info(f"Rolling window size: {window_size}")
+
+    rolling_window = deque(maxlen=window_size)
+
+    # Create the Kafka consumer using the helpful utility function.
+    consumer = create_kafka_consumer(topic, group_id)
+
+    # Poll and process messages
+    logger.info(f"Polling messages from topic '{topic}'...")
     try:
-        # consumer is a KafkaConsumer
-        # message is a kafka.consumer.fetcher.ConsumerRecord
-        # message.value is a Python dictionary
         for message in consumer:
-            processed_message = process_message(message.value)
-            if processed_message:
-                insert_message(processed_message, sql_path)
-
-    except Exception as e:
-        logger.error(f"ERROR: Could not consume messages from Kafka: {e}")
-        raise
-
-
-#####################################
-# Define Main Function
-#####################################
-
-
-def main():
-    """
-    Main function to run the consumer process.
-
-    Reads configuration, initializes the database, and starts consumption.
-    """
-    logger.info("Starting Consumer to run continuously.")
-    logger.info("Things can fail or get interrupted, so use a try block.")
-    logger.info("Moved .env variables into a utils config module.")
-
-    logger.info("STEP 1. Read environment variables using new config functions.")
-    try:
-        topic = config.get_kafka_topic()
-        kafka_url = config.get_kafka_broker_address()
-        group_id = config.get_kafka_consumer_group_id()
-        interval_secs: int = config.get_message_interval_seconds_as_int()
-        sqlite_path: pathlib.Path = config.get_sqlite_path()
-        logger.info("SUCCESS: Read environment variables.")
-    except Exception as e:
-        logger.error(f"ERROR: Failed to read environment variables: {e}")
-        sys.exit(1)
-
-    logger.info("STEP 2. Delete any prior database file for a fresh start.")
-    if sqlite_path.exists():
-        try:
-            sqlite_path.unlink()
-            logger.info("SUCCESS: Deleted database file.")
-        except Exception as e:
-            logger.error(f"ERROR: Failed to delete DB file: {e}")
-            sys.exit(2)
-
-    plot_thread =threading.Thread(target=plot_sentiment_comparison, daemon=True)
-    plot_thread.start()
-
-    logger.info("STEP 3. Initialize a new database with an empty table.")
-    try:
-        init_db(sqlite_path)
-    except Exception as e:
-        logger.error(f"ERROR: Failed to create db table: {e}")
-        sys.exit(3)
-
-    logger.info("STEP 4. Begin consuming and storing messages.")
-    try:
-        consume_messages_from_kafka(
-            topic, kafka_url, group_id, sqlite_path, interval_secs
-        )
+            message_str = message.value
+            logger.debug(f"Received message at offset {message.offset}: {message_str}")
+            process_message(message_str, rolling_window, window_size)
     except KeyboardInterrupt:
-        logger.warning("Consumer interrupted by user.")
+        logger.warning("User ceased consumer function.")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        logger.error(f"Error while consuming messages: {e}")
     finally:
-        logger.info("Consumer shutting down.")
+        consumer.close()
+        logger.info(f"Kafka consumer for topic '{topic}' closed.")
 
 
 #####################################
 # Conditional Execution
 #####################################
 
+# Ensures this script runs only when executed directly (not when imported as a module).
 if __name__ == "__main__":
     main()
