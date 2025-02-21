@@ -95,38 +95,51 @@ def plot_inventory_levels(inventory_data: dict) -> None:
     plt.show()
 
 # Function to process a single message
-def process_message(message: str, rolling_window: deque, inventory_data: dict) -> None:
+def process_message(message: str, rolling_window: deque, window_size: int) -> None:
+    """
+    Process a JSON-transferred CSV message and check for stalls.
+
+    Args:
+        message (str): JSON message received from Kafka.
+        rolling_window (deque): Rolling window of inventory levels.
+        window_size (int): Size of the rolling window.
+    """
     try:
         # Log the raw message for debugging
         logger.debug(f"Raw message: {message}")
 
         # Parse the JSON string into a Python dictionary
         data: dict = json.loads(message)
-        count = data.get("count")
-        craft_supply = data.get("craft_supply")
+        
+        # Use the correct keys based on your CSV format
+        inventory_level = data.get("inventory_level")
+        item_name = data.get("item_name")
+        
         logger.info(f"Processed JSON message: {data}")
 
         # Ensure the required fields are present
-        if count is None or craft_supply is None:
+        if inventory_level is None or item_name is None:
             logger.error(f"Invalid message format: {message}")
             return
 
-        # Append the count reading to the rolling window
-        rolling_window.append(count)
+        # Append the inventory level to the rolling window
+        rolling_window.append(inventory_level)
 
-        # Update inventory data for charting
-        if craft_supply not in inventory_data:
-            inventory_data[craft_supply] = []
-        inventory_data[craft_supply].append(count)
+        # Check for reorder alert (inventory level < 25)
+        if inventory_level < 25:
+            logger.warning(f"LOW STOCK ALERT: '{item_name}' inventory level is {inventory_level}. Reorder recommended!")
 
-        # Check for low stock and send an SMS alert if necessary
-        if count < get_sms_alert_threshold():
-            send_sms_alert(craft_supply, count)
+        # Check for a stall
+        if detect_stall(rolling_window):
+            logger.info(
+                f"STALL DETECTED at {item_name}: inventory stable at {inventory_level} over last {window_size} readings."
+            )
 
     except json.JSONDecodeError as e:
         logger.error(f"JSON decoding error for message '{message}': {e}")
     except Exception as e:
         logger.error(f"Error processing message '{message}': {e}")
+
 
 #####################################
 # Define main function for this module
