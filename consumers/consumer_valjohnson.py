@@ -16,14 +16,13 @@ from collections import deque
 load_dotenv()
 
 time_window = 50
-timestamps = deque(maxlen=time_window)
-inventory_levels = deque(maxlen=time_window)
+inventory_data = {}
 
 # Store inventory data for each item in a dictionary
 inventory_data = {}
 
-# Enable interactive mode for Matplotlib
-plt.ion()
+# Enable interactive mode for Matplotlib (not used here anymore, handling animation manually)
+#plt.ion()
 
 #####################################
 # Getter Functions for .env Variables
@@ -107,7 +106,6 @@ def create_kafka_consumer():
 # Store the last 50 inventory levels for visualization
 time_window = 50
 timestamps = deque(maxlen=time_window)
-inventory_levels = deque(maxlen=time_window)
 
 fig, ax = plt.subplots()
 
@@ -184,6 +182,9 @@ def update_plot():
 if __name__ == "__main__":
     setup_database()
 
-    # Start the consumer and plotting in the same thread
+    # Start the consumer in the main loop to avoid blocking the UI
     consume_messages()
+
+    # Start updating the plot
     update_plot()  # Start updating the plot
+
