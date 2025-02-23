@@ -3,16 +3,20 @@ import os
 import json
 import sys
 import sqlite3
-import datetime
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from kafka import KafkaConsumer
+from datetime import datetime
 from dotenv import load_dotenv
 from utils.utils_logger import logger
 from collections import deque
 
 # Load environment variables
 load_dotenv()
+
+time_window = 50
+timestamps = deque(maxlen=time_window)
+inventory_levels = deque(maxlen=time_window)
 
 # Enable interactive mode for Matplotlib
 plt.ion()
