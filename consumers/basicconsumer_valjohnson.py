@@ -4,6 +4,8 @@ import json
 import sys
 import sqlite3
 import random
+import time
+import threading
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from kafka import KafkaConsumer
@@ -177,8 +179,18 @@ def consume_messages():
         consumer.close()
         logger.info("Kafka consumer closed.")
 
+def update_plot():
+    """Update the plot in an interactive loop"""
+    ani = animation.FuncAnimation(fig, update_chart ,interval=1000)
+    plt.show()
+
+
 if __name__ == "__main__":
     setup_database()
-    ani = animation.FuncAnimation(fig, update_chart, interval=1000)
-    consume_messages()
-    plt.show(block=True)
+    
+    #Run consumer in a separate thread to avoid blocking the UI
+    consumer_thread = threading.Thread(target=consume_messages, daemon=True)
+    consumer_thread.start()
+    #Start updating the plot
+    update_plot()
+
