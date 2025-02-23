@@ -3,6 +3,7 @@ import os
 import json
 import sys
 import sqlite3
+import random
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from kafka import KafkaConsumer
@@ -17,6 +18,9 @@ load_dotenv()
 time_window = 50
 timestamps = deque(maxlen=time_window)
 inventory_levels = deque(maxlen=time_window)
+
+#Store inventory data for each item in a dictionary
+inventory_data = {}
 
 # Enable interactive mode for Matplotlib
 plt.ion()
@@ -112,14 +116,23 @@ ax.set_ylabel("Inventory Level")
 ax.set_title("Live Inventory Levels")
 ax.legend()
 
+def get_item_color(item_name):
+    """Assign a random color to each item for unique line on the plot"""
+    random.seed(hash(item_name))
+    return f'#{random.randint(0, 0xFFFFFF) :06x}' #Random hex color codes
+
 def update_chart(frame):
     """Update the inventory level chart dynamically."""
-    ax.clear()
+    ax.clear() # Clears the previous chart
     ax.plot(timestamps, inventory_levels, 'b-', label="Inventory Level")
     ax.set_xlabel("Time")
     ax.set_ylabel("Inventory Level")
     ax.set_title("Live Inventory Levels")
-    ax.legend()
+    #Plot a line for each item
+    for item_name, data in inventory_data.items():
+        ax.plot(data["timestamps"], data["inventory_levels"], label=item_name, color=data["color"])
+    ax.legend() #Update the legend with the item names
+    plt.xticks(rotation=45) #Rotate labels for better visibility
 
 #####################################
 # Main Consumer Function
@@ -142,9 +155,18 @@ def consume_messages():
             #Save data to the database
             save_to_database(timestamp, item_name, inventory_level)
 
-            #Update live chart
-            timestamps.append(datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S"))
-            inventory_levels.append(inventory_level)
+             # Initialize the data structure for the item if it doesn't exist
+            if item_name not in inventory_data:
+                inventory_data[item_name] = {
+                    "timestamps": deque(maxlen=time_window),
+                    "inventory_levels": deque(maxlen=time_window),
+                    "color": get_item_color(item_name)  # Assign a unique color
+                }
+
+            #Update inventory data for the item
+            inventory_data[item_name]["timestamps"].append(datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S"))
+            inventory_data[item_name]["inventory_levels"]. append(inventory_level)
+            
             logger.info(f"Received message: {message.value}")
 
     except KeyboardInterrupt:
