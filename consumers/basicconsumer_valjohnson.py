@@ -3,6 +3,7 @@ import os
 import json
 import sys
 import sqlite3
+import datetime
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from kafka import KafkaConsumer
@@ -129,7 +130,19 @@ def consume_messages():
 
     try:
         for message in consumer:
+            data = message.value
+            timestamp = data["timestamp"]
+            item_name = data["item_name"]
+            inventory_levels = int(data["inventory_level"])
+
+            #Save data to the database
+            save_to_database(timestamp, item_name, inventory_levels)
+
+            #Update live chart
+            timestamps.append(datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S"))
+            inventory_levels.append(inventory_levels)
             logger.info(f"Received message: {message.value}")
+
     except KeyboardInterrupt:
         logger.warning("Consumer interrupted by user.")
     except Exception as e:
@@ -139,6 +152,7 @@ def consume_messages():
         logger.info("Kafka consumer closed.")
 
 if __name__ == "__main__":
-    consume_messages()
     setup_database()
-    plt.show()
+    ani = animation.FuncAnimation(fig, update_chart, interval=1000)
+    consume_messages()
+    plt.show(block=True)
