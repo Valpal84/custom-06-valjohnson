@@ -1,4 +1,3 @@
-# Import necessary packages
 import os
 import json
 import sqlite3
@@ -11,23 +10,19 @@ from datetime import datetime
 from dotenv import load_dotenv
 from utils.utils_logger import logger
 from collections import deque
+import threading
 
 # Load environment variables
 load_dotenv()
 
-time_window = 50
-inventory_data = {}
-
 # Store inventory data for each item in a dictionary
 inventory_data = {}
 
-# Enable interactive mode for Matplotlib (not used here anymore, handling animation manually)
-#plt.ion()
+# Constants
+ALERT_THRESHOLD = 50
+time_window = 50
 
-#####################################
 # Getter Functions for .env Variables
-#####################################
-
 def get_kafka_topic() -> str:
     """Fetch Kafka topic from environment or use default."""
     topic = os.getenv("INVENTORY_TOPIC", "inventory_topic")
@@ -40,11 +35,9 @@ def get_kafka_bootstrap_servers() -> str:
     logger.info(f"Kafka bootstrap servers: {bootstrap_servers}")
     return bootstrap_servers
 
-
 #####################################
 # Inventory levels database setup
 #####################################
-
 DB_FILE = "inventorylevels.db"
 
 def setup_database():
@@ -78,7 +71,6 @@ def save_to_database(timestamp, item_name, inventory_level):
 #####################################
 # Kafka Consumer
 #####################################
-
 def create_kafka_consumer():
     """
     Create and return a Kafka consumer.
@@ -104,8 +96,8 @@ def create_kafka_consumer():
 #####################################
 
 # Store the last 50 inventory levels for visualization
-time_window = 50
 timestamps = deque(maxlen=time_window)
+inventory_levels = deque(maxlen=time_window)
 
 fig, ax = plt.subplots()
 
@@ -123,32 +115,31 @@ def update_chart(frame):
     for item_name, data in inventory_data.items():
         ax.plot(data["timestamps"], data["inventory_levels"], label=item_name, color=data["color"])
     
-    #Plot a static threshold line
+    # Plot a static threshold line
     ax.axhline(ALERT_THRESHOLD, color='red', linestyle='--', label=f"Threshold ({ALERT_THRESHOLD})")
     
-    #Relabel chart after clearing it
+    # Relabel chart after clearing it
     ax.set_xlabel("Time")
     ax.set_ylabel("Inventory Level")
     ax.set_title("Live Inventory Levels")
-    #Add a legend
+    
+    # Add a legend
     ax.legend() 
     
-    plt.xticks(rotation=45)  # Rotate labels for better visibility
-    plt.tight_layout()  # Ensure layout is tight and labels are not cut off
-
-ALERT_THRESHOLD = 50
+    # Rotate labels for better visibility
+    plt.xticks(rotation=45)
+    
+    # Ensure layout is tight and labels are not cut off
+    plt.tight_layout()
 
 def check_inventory_threshold(item_name, inventory_level):
-    """Check if inventory level falls below the alert threshold to alert for inventory reordering purposes
-    """
+    """Check if inventory level falls below the alert threshold to alert for inventory reordering purposes."""
     if inventory_level < ALERT_THRESHOLD:
         logger.warning(f"ALERT: {item_name} inventory has dropped below {ALERT_THRESHOLD}! Current level: {inventory_level}. Consider ordering more inventory")
-
 
 #####################################
 # Main Consumer Function
 #####################################
-
 def consume_messages():
     """
     Consumes messages from Kafka topic and processes them and checks for inventory threshold.
@@ -178,7 +169,7 @@ def consume_messages():
             inventory_data[item_name]["timestamps"].append(datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S"))
             inventory_data[item_name]["inventory_levels"].append(inventory_level)
 
-            #Check if inventory level has dropped below the threshold
+            # Check if inventory level has dropped below the threshold
             check_inventory_threshold(item_name, inventory_level)
 
             logger.info(f"Received message: {message.value}")
@@ -191,18 +182,23 @@ def consume_messages():
         consumer.close()
         logger.info("Kafka consumer closed.")
 
-def update_plot():
-    """Update the plot in an interactive loop."""
-    ani = animation.FuncAnimation(fig, update_chart, interval=1000)  # Create the animation object
-    plt.show()  # Ensure the plot window remains open
-    return ani  # Return the animation object to keep it alive
+#####################################
+# Start Kafka Consumer and Update Plot
+#####################################
+
+def start_consumer_and_plot():
+    """Start the consumer in a separate thread and update the plot."""
+    consumer_thread = threading.Thread(target=consume_messages, daemon=True)
+    consumer_thread.start()
+
+    # Create animation, set cache_frame_data=False, avoid warning, keep the animation in memory
+    ani = animation.FuncAnimation(fig, update_chart, interval=1000, cache_frame_data=False)  # Update every 1 second
+
+    # Keep the animation alive by not exiting the thread prematurely
+    plt.show()  # This will keep the plot window open
+
+    # The animation will keep running in the background while the plot is showing
 
 if __name__ == "__main__":
     setup_database()
-
-    # Start the consumer in the main loop to avoid blocking the UI
-    consume_messages()
-
-    # Start updating the plot
-    update_plot()  # Start updating the plot
-
+    start_consumer_and_plot()  # Start both consumer and plot update
