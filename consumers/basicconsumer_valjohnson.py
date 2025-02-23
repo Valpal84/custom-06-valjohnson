@@ -137,18 +137,18 @@ def consume_messages():
             data = message.value
             timestamp = data["timestamp"]
             item_name = data["item_name"]
-            inventory_levels = int(data["inventory_level"])
+            inventory_level = int(data["inventory_level"])
 
             #Save data to the database
-            save_to_database(timestamp, item_name, inventory_levels)
+            save_to_database(timestamp, item_name, inventory_level)
 
             #Update live chart
             timestamps.append(datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S"))
-            inventory_levels.append(inventory_levels)
+            inventory_levels.append(inventory_level)
             logger.info(f"Received message: {message.value}")
 
     except KeyboardInterrupt:
-        logger.warning("Consumer interrupted by user.")
+        logger.warning("User ceased consumer function.")
     except Exception as e:
         logger.error(f"Error in Kafka consumer: {e}")
     finally:
