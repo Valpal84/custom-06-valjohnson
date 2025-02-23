@@ -13,6 +13,9 @@ from collections import deque
 # Load environment variables
 load_dotenv()
 
+# Enable interactive mode for Matplotlib
+plt.ion()
+
 #####################################
 # Getter Functions for .env Variables
 #####################################
@@ -137,3 +140,5 @@ def consume_messages():
 
 if __name__ == "__main__":
     consume_messages()
+    setup_database()
+    plt.show()
