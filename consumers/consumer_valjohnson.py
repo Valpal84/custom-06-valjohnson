@@ -123,12 +123,27 @@ def update_chart(frame):
     for item_name, data in inventory_data.items():
         ax.plot(data["timestamps"], data["inventory_levels"], label=item_name, color=data["color"])
     
+    #Plot a static threshold line
+    ax.axhline(ALERT_THRESHOLD, color='red', linestyle='--', label=f"Threshold ({ALERT_THRESHOLD})")
+    
+    #Relabel chart after clearing it
     ax.set_xlabel("Time")
     ax.set_ylabel("Inventory Level")
     ax.set_title("Live Inventory Levels")
-    ax.legend()  # Update the legend with the item names
+    #Add a legend
+    ax.legend() 
+    
     plt.xticks(rotation=45)  # Rotate labels for better visibility
     plt.tight_layout()  # Ensure layout is tight and labels are not cut off
+
+ALERT_THRESHOLD = 50
+
+def check_inventory_threshold(item_name, inventory_level):
+    """Check if inventory level falls below the alert threshold to alert for inventory reordering purposes
+    """
+    if inventory_level < ALERT_THRESHOLD:
+        logger.warning(f"ALERT: {item_name} inventory has dropped below {ALERT_THRESHOLD}! Current level: {inventory_level}. Consider ordering more inventory")
+
 
 #####################################
 # Main Consumer Function
@@ -136,7 +151,7 @@ def update_chart(frame):
 
 def consume_messages():
     """
-    Consumes messages from Kafka topic and processes them.
+    Consumes messages from Kafka topic and processes them and checks for inventory threshold.
     """
     consumer = create_kafka_consumer()
     logger.info("Kafka consumer started. Listening for messages...")
@@ -162,6 +177,9 @@ def consume_messages():
             # Update inventory data for the item
             inventory_data[item_name]["timestamps"].append(datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S"))
             inventory_data[item_name]["inventory_levels"].append(inventory_level)
+
+            #Check if inventory level has dropped below the threshold
+            check_inventory_threshold(item_name, inventory_level)
 
             logger.info(f"Received message: {message.value}")
 
