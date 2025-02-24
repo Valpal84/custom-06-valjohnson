@@ -24,10 +24,21 @@ This project uses a kafka consumer that processes csv messages from a kafka topi
 
 # Tasks to start this project
 1. Fork the REPO to your own device
-2. Manage local virtual environment
-3. Install necessary dependencies into virtual environment
-4. Start Zookeeper services
-5. Start Kafka services
+2. Create a local virtual environment .venv (you'll want to use python 3.11 for this)
+    - py -3.11 -m venv .venv (for windows)
+    - python3 -3.11 -m venv .venv (Mac)
+3. Manage local virtual environment
+4. Install necessary dependencies into virtual environment (replace py with python3 for Mac/Linux)
+    - py -m pip install --upgrade pip setuptools wheel (windows)
+    - py -m pip install --upgrade -r requirements.txt (windows)
+5. Start Zookeeper services
+    - cd ~/kafka
+    - chmod +x zookeeper-server-start.sh
+    - bin/zookeeper-server-start.sh config/zookeeper.properties
+6. Start Kafka services
+    - cd ~/kafka
+    - chmod +x kafka-server-start.sh
+    - bin/kafka-server-start.sh config/server.properties
 
 # Start the kafka producer in a new terminal
 1. Activate the virtual environment
