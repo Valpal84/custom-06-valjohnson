@@ -87,6 +87,7 @@ loguru
 
 # Environment variables management
 python-dotenv
+dotenv
 
 #Imports
 matplotlib
@@ -95,7 +96,7 @@ matplotlib
 # ======================================================
 # KAFKA MESSAGE BROKER INTEGRATION
 # ======================================================
-
+kafka
 six
 kafka-python-ng
 
