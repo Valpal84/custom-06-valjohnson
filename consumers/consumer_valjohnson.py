@@ -108,29 +108,40 @@ def get_item_color(item_name):
     return f'#{random.randint(0, 0xFFFFFF) :06x}'  # Random hex color codes
 
 def update_chart(frame):
-    """Update the inventory level chart dynamically."""
+    """Update the inventory level chart dynamically to show average inventory levels per item."""
     ax.clear()  # Clears the previous chart
     
-    # Plot a line for each item
+    if not inventory_data:
+        return  # Avoid errors if no data is available
+
     for item_name, data in inventory_data.items():
-        ax.plot(data["timestamps"], data["inventory_levels"], label=item_name, color=data["color"])
-    
+        if len(data["timestamps"]) > 0:
+            avg_inventory_levels = []
+            window_size = min(len(data["inventory_levels"]), time_window)  # Ensure we don’t exceed available data
+
+            # Compute moving average
+            for i in range(window_size):
+                avg_inventory_levels.append(sum(data["inventory_levels"][:i+1]) / (i+1))
+
+            ax.plot(data["timestamps"], avg_inventory_levels, label=f"Avg {item_name}", color=data["color"])
+
     # Plot a static threshold line
     ax.axhline(ALERT_THRESHOLD, color='red', linestyle='--', label=f"Threshold ({ALERT_THRESHOLD})")
-    
+
     # Relabel chart after clearing it
     ax.set_xlabel("Time")
-    ax.set_ylabel("Inventory Level")
-    ax.set_title("Live Inventory Levels")
-    
+    ax.set_ylabel("Average Inventory Level")
+    ax.set_title("Live Average Inventory Levels Per Item")
+
     # Add a legend
-    ax.legend() 
+    ax.legend()
     
     # Rotate labels for better visibility
     plt.xticks(rotation=45)
     
     # Ensure layout is tight and labels are not cut off
     plt.tight_layout()
+
 
 def check_inventory_threshold(item_name, inventory_level):
     """Check if inventory level falls below the alert threshold to alert for inventory reordering purposes."""
